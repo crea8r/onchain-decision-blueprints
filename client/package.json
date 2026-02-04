@@ -1,0 +1,10 @@
+{
+  "name": "onchain-decision-blueprints-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "node -c src/index.js",
+    "demo": "node src/demo.js"
+  }
+}
