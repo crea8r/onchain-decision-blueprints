@@ -29,6 +29,7 @@
     .pill{display:inline-block;padding:4px 9px;border-radius:999px;border:1px solid #2b3b50;background:#0b121b;font-size:12px}
     .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
     .graph{display:grid;grid-template-columns:repeat(12,1fr);gap:8px;align-items:start}
+    .hint{font-size:12px;color:var(--muted);margin-top:6px}
     .node{grid-column:span 4;background:#0b121b;border:1px solid #2b3b50;border-radius:12px;padding:10px}
     .node.active{outline:2px solid rgba(126,231,135,.7)}
     .node .k{font-size:12px;color:var(--muted)}
@@ -58,6 +59,10 @@
           <span class="pill">Attestation-based</span>
           <span class="pill">Branch / retry</span>
         </div>
+        <h3 style="margin-top:10px">Visual walkthrough</h3>
+        <div class="small">A simple canvas animation of the mission moving through steps (before the details below).</div>
+        <div class="sep"></div>
+        <canvas id="viz" width="980" height="200" style="width:100%;height:auto;border-radius:14px;border:1px solid #223042;background:#081018"></canvas>
         <div class="sep"></div>
         <div id="graph" class="graph"></div>
       </div>

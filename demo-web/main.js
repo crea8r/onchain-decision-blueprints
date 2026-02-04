@@ -174,6 +174,7 @@ function log(m, msg) {
 const ui = {
   tabs: document.getElementById('tabs'),
   graph: document.getElementById('graph'),
+  viz: document.getElementById('viz'),
   curId: document.getElementById('curId'),
   curExplain: document.getElementById('curExplain'),
   vars: document.getElementById('vars'),
@@ -189,6 +190,16 @@ const ui = {
 
 let scenarioKey = 'contract';
 let mission = null;
+let lastCur = null;
+
+// Canvas animation state
+let anim = {
+  fromIdx: 0,
+  toIdx: 0,
+  t0: 0,
+  durationMs: 520,
+  running: false,
+};
 
 function scenario() { return SCENARIOS[scenarioKey]; }
 
@@ -198,7 +209,7 @@ function renderTabs() {
     const b = document.createElement('button');
     b.className = 'tab' + (s.key === scenarioKey ? ' active' : '');
     b.textContent = s.title;
-    b.onclick = () => { scenarioKey = s.key; mission = null; renderAll(); };
+    b.onclick = () => { scenarioKey = s.key; mission = null; lastCur = null; anim.running = false; renderAll(); };
     ui.tabs.appendChild(b);
   }
 }
@@ -216,6 +227,132 @@ function renderGraph() {
     `;
     ui.graph.appendChild(d);
   }
+}
+
+function renderViz() {
+  const canvas = ui.viz;
+  if (!canvas) return;
+
+  // Make canvas crisp on HiDPI.
+  const cssWidth = canvas.clientWidth || 980;
+  const cssHeight = 200;
+  const dpr = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+  canvas.width = Math.floor(cssWidth * dpr);
+  canvas.height = Math.floor(cssHeight * dpr);
+
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const cps = scenario().checkpoints;
+  const n = cps.length;
+  const padX = 26;
+  const y = 80;
+  const step = n <= 1 ? 0 : (cssWidth - padX * 2) / (n - 1);
+
+  const points = cps.map((cp, i) => ({
+    id: cp.id,
+    title: cp.title,
+    mode: cp.mode,
+    x: padX + step * i,
+    y,
+  }));
+
+  const idxById = new Map(points.map((p, i) => [p.id, i]));
+  const curIdx = mission ? idxById.get(mission.cur) ?? 0 : 0;
+  const fromIdx = lastCur ? (idxById.get(lastCur) ?? curIdx) : curIdx;
+
+  // Start an animation when checkpoint changes.
+  if (mission && (anim.toIdx !== curIdx || !anim.running) && lastCur && lastCur !== mission.cur) {
+    anim.fromIdx = fromIdx;
+    anim.toIdx = curIdx;
+    anim.t0 = performance.now();
+    anim.running = true;
+  }
+
+  function draw(tNow) {
+    const t = anim.running ? Math.min(1, (tNow - anim.t0) / anim.durationMs) : 1;
+
+    // background
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    // title
+    ctx.fillStyle = 'rgba(148,163,184,0.9)';
+    ctx.font = '12px ui-sans-serif, system-ui';
+    ctx.fillText(scenario().subtitle, 18, 22);
+
+    // connectors
+    ctx.strokeStyle = 'rgba(36,48,64,1)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i], b = points[i + 1];
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
+    ctx.stroke();
+
+    // nodes
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      const isActive = mission && i === curIdx;
+
+      ctx.fillStyle = '#0b121b';
+      ctx.strokeStyle = isActive ? 'rgba(126,231,135,0.9)' : 'rgba(43,59,80,1)';
+      ctx.lineWidth = isActive ? 3 : 2;
+
+      // node circle
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // id label
+      ctx.fillStyle = 'rgba(230,237,243,0.9)';
+      ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(p.id, p.x, p.y);
+
+      // mode mini-tag
+      ctx.textBaseline = 'alphabetic';
+      ctx.textAlign = 'center';
+      ctx.font = '11px ui-sans-serif, system-ui';
+      const tag = p.mode === 'enforced' ? 'ON-CHAIN' : (p.mode === 'attestation' ? 'ATTEST' : 'BRANCH');
+      ctx.fillStyle = p.mode === 'enforced' ? 'rgba(31,111,235,0.9)' : (p.mode === 'attestation' ? 'rgba(242,204,96,0.9)' : 'rgba(148,163,184,0.9)');
+      ctx.fillText(tag, p.x, p.y + 34);
+    }
+
+    // token position
+    const fromP = points[anim.fromIdx] || points[0];
+    const toP = points[anim.toIdx] || fromP;
+    const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    const tx = fromP.x + (toP.x - fromP.x) * ease;
+    const ty = fromP.y + (toP.y - fromP.y) * ease - 26;
+
+    // token
+    ctx.fillStyle = 'rgba(126,231,135,0.95)';
+    ctx.strokeStyle = 'rgba(126,231,135,0.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(tx, ty, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(230,237,243,0.9)';
+    ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('M', tx, ty + 0.5);
+
+    if (anim.running && t < 1) {
+      requestAnimationFrame(draw);
+    } else {
+      anim.running = false;
+      anim.fromIdx = anim.toIdx;
+    }
+  }
+
+  requestAnimationFrame(draw);
 }
 
 function badge(mode) {
@@ -246,6 +383,7 @@ function renderMission() {
 
 function renderAll() {
   renderTabs();
+  renderViz();
   renderGraph();
   renderMission();
 }
@@ -261,6 +399,7 @@ function startMission() {
     log: [],
     status: 'STARTED',
   };
+  lastCur = null;
   log(mission, `Mission started from blueprint "${scenario().key}".`);
   log(mission, 'Key idea: chain enforces ordering + state, while some checkpoints accept attestations.');
   // run first checkpoint action immediately
@@ -280,6 +419,7 @@ function flags() {
 function nextCheckpoint() {
   const cps = scenario().checkpoints;
   const idx = cps.findIndex(c => c.id === mission.cur);
+  lastCur = mission.cur;
   if (idx === -1) return;
   if (mission.status === 'DONE' || mission.status === 'ESCALATED' || mission.status === 'BLOCKED') return;
 
@@ -305,6 +445,7 @@ function nextCheckpoint() {
 
 function reset() {
   mission = null;
+  lastCur = null;
   renderAll();
 }
 
@@ -312,4 +453,5 @@ ui.btnStart.onclick = startMission;
 ui.btnNext.onclick = nextCheckpoint;
 ui.btnReset.onclick = reset;
 
+window.addEventListener('resize', () => renderViz());
 renderAll();
