@@ -1,298 +1,315 @@
-import {
-  Connection,
-  PublicKey,
-  SystemProgram,
-  Transaction,
-  TransactionInstruction,
-  clusterApiUrl,
-} from 'https://esm.sh/@solana/web3.js@1.95.4?bundle';
+// Interactive explainer (no wallet, no chain). The UI is designed to teach humans.
+// Model: Blueprint = template; Mission = blueprint-in-action; Checkpoint = step machine.
 
-// ---- borsh helpers (minimal) ----
-import { serialize } from 'https://esm.sh/borsh@2.0.0?bundle';
+const SCENARIOS = {
+  contract: {
+    key: 'contract',
+    title: 'A) Agent-to-agent Contract Negotiation (primary)',
+    subtitle: 'Buyer agent + seller agent negotiate terms, then org gatekeepers attest before execution.',
+    checkpoints: [
+      {
+        id: 'C1',
+        title: 'Intake: capture scope',
+        mode: 'enforced',
+        explain: 'Input → agent captures requirements. On-chain stores mission variables (scope, budget, timeline).',
+        action: (m) => {
+          m.vars.scope = 'API integration + support';
+          m.vars.budget = 12000;
+          m.vars.timeline_days = 14;
+          log(m, 'BuyerAgent: captured scope/budget/timeline.');
+        },
+      },
+      {
+        id: 'C2',
+        title: 'Negotiate terms (loop)',
+        mode: 'branch',
+        explain: 'Agents exchange offers. Chain records the selected terms hash. Timeout escalates to human.',
+        action: (m, flags) => {
+          m.vars.negotiation_rounds = (m.vars.negotiation_rounds || 0) + 1;
+          const rounds = m.vars.negotiation_rounds;
+          if (flags.timeout && rounds >= 2) {
+            m.vars.escalated = true;
+            m.status = 'ESCALATED';
+            log(m, 'Negotiation timed out → EscalateToHuman checkpoint (mission paused).');
+            return { halt: true };
+          }
+          // converge to a deal
+          m.vars.price = Math.max(9000, 14000 - rounds * 1000);
+          m.vars.sla = rounds >= 2 ? 'gold' : 'silver';
+          m.vars.terms_hash = hash(`${m.vars.scope}|${m.vars.price}|${m.vars.sla}|${m.vars.timeline_days}`);
+          log(m, `SellerAgent: offered price=${m.vars.price}, sla=${m.vars.sla}.`);
+          log(m, `BuyerAgent: accepted terms_hash=${m.vars.terms_hash.slice(0,8)}…`);
+        },
+      },
+      {
+        id: 'C3',
+        title: 'Risk/Legal/Finance attest (2-of-3)',
+        mode: 'attestation',
+        explain: 'Critical checkpoint. Requires 2-of-3 attestations matching current terms_hash.',
+        action: (m, flags) => {
+          const required = 2;
+          const roles = ['RiskAgent', 'LegalAgent', 'FinanceAgent'];
+          const term = m.vars.terms_hash;
 
-// Match Rust enum discriminants order in program/src/instruction.rs
-const IX = {
-  InitializeBlueprint: 0,
-  ProposeAction: 1,
-  ApproveAction: 2,
-  ExecuteAction: 3,
+          // Create attestations
+          const atts = [];
+          for (const r of roles) {
+            let decision = 'PASS';
+            if (flags.conflict && r === 'LegalAgent') decision = 'FAIL';
+            const forHash = flags.drift && r === 'FinanceAgent' ? hash(term + ':old') : term;
+            atts.push({ role: r, decision, terms_hash: forHash });
+          }
+          m.atts = atts;
+
+          const matchingPass = atts.filter(a => a.decision === 'PASS' && a.terms_hash === term);
+          log(m, `Attestations collected. Matching PASS = ${matchingPass.length}/${required}.`);
+
+          if (matchingPass.length < required) {
+            m.status = 'BLOCKED';
+            log(m, 'BLOCKED: not enough valid attestations for current terms. Route to ResolveDiscrepancy.');
+            return { halt: true };
+          }
+
+          m.status = 'READY_TO_SIGN';
+          log(m, 'OK: threshold met. Mission can proceed to signature/execution gating.');
+        },
+      },
+      {
+        id: 'C4',
+        title: 'Signature + lock contract hash',
+        mode: 'enforced',
+        explain: 'On-chain locks the contract_hash. Future steps reference this immutable artifact.',
+        action: (m) => {
+          m.vars.contract_hash = hash('contract:' + m.vars.terms_hash);
+          log(m, `Contract signed. contract_hash=${m.vars.contract_hash.slice(0,8)}…`);
+        },
+      },
+      {
+        id: 'C5',
+        title: 'Fulfillment: milestone → payment release',
+        mode: 'enforced',
+        explain: 'Milestone attestations unlock on-chain actions (e.g., release funds). Disputes branch.',
+        action: (m) => {
+          m.vars.milestone_1 = 'DELIVERED';
+          m.vars.payment_1 = 'RELEASED';
+          log(m, 'SellerAgent: delivered milestone_1 (attested).');
+          log(m, 'System: released payment_1 (gated by milestone completion).');
+          m.status = 'DONE';
+        },
+      },
+    ],
+  },
+
+  support: {
+    key: 'support',
+    title: 'B) Customer Support Agent Following On-chain Policy',
+    subtitle: 'A support agent must follow exact escalation/refund guidelines with an audit trail.',
+    checkpoints: [
+      {
+        id: 'S1',
+        title: 'Authenticate customer',
+        mode: 'attestation',
+        explain: 'Attestation-based: agent attests identity check (SSO, email OTP, etc.).',
+        action: (m) => {
+          m.atts = [{ role: 'SupportAgent', decision: 'PASS', terms_hash: 'n/a' }];
+          m.vars.customer_verified = true;
+          log(m, 'SupportAgent attested customer_verified=true.');
+        },
+      },
+      {
+        id: 'S2',
+        title: 'Classify issue + severity',
+        mode: 'enforced',
+        explain: 'On-chain stores case classification for consistency and later audits.',
+        action: (m) => {
+          m.vars.issue = 'billing_dispute';
+          m.vars.severity = 'P2';
+          log(m, 'SupportAgent classified issue=billing_dispute severity=P2.');
+        },
+      },
+      {
+        id: 'S3',
+        title: 'Refund policy checkpoint (2-of-3 for >$500)',
+        mode: 'attestation',
+        explain: 'Refunds are powerful. For high amounts, require threshold signoff (SupportLead + Finance + Risk).',
+        action: (m) => {
+          m.vars.refund_amount = 800;
+          m.atts = [
+            { role: 'SupportLead', decision: 'PASS', terms_hash: 'refund:800' },
+            { role: 'FinanceAgent', decision: 'PASS', terms_hash: 'refund:800' },
+            { role: 'RiskAgent', decision: 'PASS', terms_hash: 'refund:800' },
+          ];
+          log(m, 'Refund approved via threshold attestations.');
+        },
+      },
+      {
+        id: 'S4',
+        title: 'Execute refund + close case',
+        mode: 'enforced',
+        explain: 'On-chain execution follows exact guideline. Audit trail is built-in.',
+        action: (m) => {
+          m.vars.refund_status = 'EXECUTED';
+          m.status = 'DONE';
+          log(m, 'System executed refund and closed case.');
+        },
+      },
+    ],
+  },
 };
 
-class InitializeBlueprint {
-  constructor(fields) {
-    Object.assign(this, fields);
+function hash(s) {
+  // not cryptographic—just stable for the explainer
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
   }
-}
-class ProposeAction {
-  constructor(fields) {
-    Object.assign(this, fields);
-  }
-}
-class Empty {}
-
-// Borsh schema for our instruction enum wrapper
-// We encode as: u8 variant + variant struct.
-// NOTE: For Vec<Pubkey>, borsh expects bytes; we encode as Vec<[u8;32]>
-const Schema = new Map([
-  [InitializeBlueprint, { kind: 'struct', fields: [['approvers', ['u8']], ['threshold', 'u8']] }],
-]);
-
-// We will implement custom packing to keep it explicit and stable.
-function u8(n) { return new Uint8Array([n & 0xff]); }
-function u16le(n) {
-  const b = new Uint8Array(2);
-  b[0] = n & 0xff;
-  b[1] = (n >> 8) & 0xff;
-  return b;
-}
-function u32le(n) {
-  const b = new Uint8Array(4);
-  b[0] = n & 0xff;
-  b[1] = (n >> 8) & 0xff;
-  b[2] = (n >> 16) & 0xff;
-  b[3] = (n >> 24) & 0xff;
-  return b;
-}
-function concat(...arrs) {
-  const len = arrs.reduce((s,a)=>s+a.length,0);
-  const out = new Uint8Array(len);
-  let o=0;
-  for (const a of arrs) { out.set(a, o); o += a.length; }
-  return out;
+  return (h >>> 0).toString(16).padStart(8, '0') + (s.length.toString(16).padStart(4, '0'));
 }
 
-async function sha256Bytes(text) {
-  const enc = new TextEncoder().encode(text);
-  const hash = await crypto.subtle.digest('SHA-256', enc);
-  return new Uint8Array(hash);
+function log(m, msg) {
+  m.log.push(msg);
 }
 
-function logLine(s) {
-  const el = document.getElementById('log');
-  el.textContent += s + "\n";
-  el.scrollTop = el.scrollHeight;
-}
-function setWalletState(status, cls='warn') {
-  const el = document.getElementById('walletState');
-  el.innerHTML = `wallet: <span class="${cls}">${status}</span>`;
-}
-
-function getProvider() {
-  if ('solana' in window) return window.solana;
-  return null;
-}
-
-function getRpcUrl() {
-  const v = document.getElementById('rpcUrl').value.trim();
-  return v || clusterApiUrl('devnet');
-}
-function getProgramId() {
-  const v = document.getElementById('programId').value.trim();
-  if (!v) throw new Error('Program ID required (deploy program to devnet first).');
-  return new PublicKey(v);
-}
-
-function parseApprovers() {
-  const lines = document.getElementById('approvers').value
-    .split(/\r?\n/)
-    .map(s => s.trim())
-    .filter(Boolean);
-  return lines.map(l => new PublicKey(l));
-}
-
-async function deriveBlueprintPda(programId, authorityPk) {
-  const [pda] = await PublicKey.findProgramAddress(
-    [new TextEncoder().encode('blueprint'), authorityPk.toBytes()],
-    programId
-  );
-  return pda;
-}
-
-async function deriveProposalPda(programId, blueprintPda, payloadHash32) {
-  const [pda] = await PublicKey.findProgramAddress(
-    [new TextEncoder().encode('proposal'), blueprintPda.toBytes(), payloadHash32],
-    programId
-  );
-  return pda;
-}
-
-function packInitializeBlueprint(approvers, threshold) {
-  // Rust: InitializeBlueprint { approvers: Vec<Pubkey>, threshold: u8 }
-  // borsh: variant u8 + vec_len u32 + vec items(32 bytes each) + threshold u8
-  const items = approvers.map(pk => pk.toBytes());
-  const len = u32le(items.length);
-  const body = concat(len, ...items, u8(threshold));
-  return concat(u8(IX.InitializeBlueprint), body);
-}
-
-function packProposeAction(actionType, payloadHash32) {
-  // Rust: ProposeAction { action_type: u16, payload_hash: [u8;32] }
-  return concat(u8(IX.ProposeAction), u16le(actionType), payloadHash32);
-}
-
-function packApprove() {
-  return u8(IX.ApproveAction);
-}
-
-function packExecute() {
-  return u8(IX.ExecuteAction);
-}
-
-let walletPk = null;
-let last = {
-  blueprintPda: null,
-  proposalPda: null,
-  payloadHash: null,
+const ui = {
+  tabs: document.getElementById('tabs'),
+  graph: document.getElementById('graph'),
+  curId: document.getElementById('curId'),
+  curExplain: document.getElementById('curExplain'),
+  vars: document.getElementById('vars'),
+  atts: document.getElementById('atts'),
+  log: document.getElementById('log'),
+  btnStart: document.getElementById('btnStart'),
+  btnNext: document.getElementById('btnNext'),
+  btnReset: document.getElementById('btnReset'),
+  hiccupConflict: document.getElementById('hiccupConflict'),
+  hiccupDrift: document.getElementById('hiccupDrift'),
+  hiccupTimeout: document.getElementById('hiccupTimeout'),
 };
 
-async function sendTx(ixs) {
-  const provider = getProvider();
-  const conn = new Connection(getRpcUrl(), 'confirmed');
-  const tx = new Transaction().add(...ixs);
-  tx.feePayer = walletPk;
-  const { blockhash } = await conn.getLatestBlockhash('finalized');
-  tx.recentBlockhash = blockhash;
+let scenarioKey = 'contract';
+let mission = null;
 
-  const signed = await provider.signTransaction(tx);
-  const sig = await conn.sendRawTransaction(signed.serialize());
-  logLine(`→ sent: ${sig}`);
-  const conf = await conn.confirmTransaction(sig, 'confirmed');
-  logLine(`✓ confirmed: ${sig}`);
-  return sig;
+function scenario() { return SCENARIOS[scenarioKey]; }
+
+function renderTabs() {
+  ui.tabs.innerHTML = '';
+  for (const s of Object.values(SCENARIOS)) {
+    const b = document.createElement('button');
+    b.className = 'tab' + (s.key === scenarioKey ? ' active' : '');
+    b.textContent = s.title;
+    b.onclick = () => { scenarioKey = s.key; mission = null; renderAll(); };
+    ui.tabs.appendChild(b);
+  }
 }
 
-async function connect() {
-  const provider = getProvider();
-  if (!provider) throw new Error('No Solana provider found. Install Phantom.');
-  const resp = await provider.connect();
-  walletPk = new PublicKey(resp.publicKey.toString());
-  document.getElementById('authority').value = walletPk.toBase58();
-  setWalletState(walletPk.toBase58().slice(0, 4) + '…' + walletPk.toBase58().slice(-4), 'ok');
-  logLine('Connected wallet ' + walletPk.toBase58());
+function renderGraph() {
+  ui.graph.innerHTML = '';
+  const cps = scenario().checkpoints;
+  for (const cp of cps) {
+    const d = document.createElement('div');
+    d.className = 'node' + (mission && mission.cur === cp.id ? ' active' : '');
+    d.innerHTML = `
+      <div class="k">${cp.id} • ${badge(cp.mode)}</div>
+      <div class="t">${cp.title}</div>
+      <div class="meta">${cp.explain}</div>
+    `;
+    ui.graph.appendChild(d);
+  }
 }
 
-async function disconnect() {
-  const provider = getProvider();
-  if (provider?.disconnect) await provider.disconnect();
-  walletPk = null;
-  document.getElementById('authority').value = '';
-  setWalletState('disconnected', 'warn');
+function badge(mode) {
+  if (mode === 'enforced') return '<span class="pill">Enforced on-chain</span>';
+  if (mode === 'attestation') return '<span class="pill">Attestation-based</span>';
+  return '<span class="pill">Branch / retry</span>';
 }
 
-async function initBlueprint() {
-  if (!walletPk) throw new Error('Connect wallet first');
-  const programId = getProgramId();
-  const conn = new Connection(getRpcUrl(), 'confirmed');
-
-  const authority = walletPk;
-  const blueprintPda = await deriveBlueprintPda(programId, authority);
-
-  const approvers = parseApprovers();
-  const threshold = parseInt(document.getElementById('threshold').value, 10);
-  if (!Number.isFinite(threshold) || threshold <= 0) throw new Error('Invalid threshold');
-
-  const data = packInitializeBlueprint(approvers, threshold);
-
-  const ix = new TransactionInstruction({
-    programId,
-    keys: [
-      { pubkey: authority, isSigner: true, isWritable: true },
-      { pubkey: blueprintPda, isSigner: false, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    data,
-  });
-
-  logLine('Initializing blueprint PDA ' + blueprintPda.toBase58());
-  await sendTx([ix]);
-  last.blueprintPda = blueprintPda;
-}
-
-async function propose() {
-  if (!walletPk) throw new Error('Connect wallet first');
-  const programId = getProgramId();
-  if (!last.blueprintPda) throw new Error('Initialize blueprint first');
-
-  const actionType = parseInt(document.getElementById('actionType').value, 10);
-  const payload = document.getElementById('payload').value || '';
-  const payloadHash = await sha256Bytes(payload);
-
-  const proposalPda = await deriveProposalPda(programId, last.blueprintPda, payloadHash);
-  const data = packProposeAction(actionType, payloadHash);
-
-  const ix = new TransactionInstruction({
-    programId,
-    keys: [
-      { pubkey: walletPk, isSigner: true, isWritable: true },
-      { pubkey: last.blueprintPda, isSigner: false, isWritable: false },
-      { pubkey: proposalPda, isSigner: false, isWritable: true },
-      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-    ],
-    data,
-  });
-
-  logLine('Proposing action. payload_hash=' + Buffer.from(payloadHash).toString('hex'));
-  await sendTx([ix]);
-  last.proposalPda = proposalPda;
-  last.payloadHash = payloadHash;
-  logLine('Proposal PDA ' + proposalPda.toBase58());
-}
-
-async function approve() {
-  if (!walletPk) throw new Error('Connect wallet first');
-  const programId = getProgramId();
-  if (!last.blueprintPda || !last.proposalPda) throw new Error('Propose first');
-
-  const data = packApprove();
-  const ix = new TransactionInstruction({
-    programId,
-    keys: [
-      { pubkey: walletPk, isSigner: true, isWritable: false },
-      { pubkey: last.blueprintPda, isSigner: false, isWritable: false },
-      { pubkey: last.proposalPda, isSigner: false, isWritable: true },
-    ],
-    data,
-  });
-
-  logLine('Approving proposal ' + last.proposalPda.toBase58());
-  await sendTx([ix]);
-}
-
-async function execute() {
-  if (!walletPk) throw new Error('Connect wallet first');
-  const programId = getProgramId();
-  if (!last.blueprintPda || !last.proposalPda) throw new Error('Propose first');
-
-  const data = packExecute();
-  const ix = new TransactionInstruction({
-    programId,
-    keys: [
-      { pubkey: walletPk, isSigner: true, isWritable: false },
-      { pubkey: last.blueprintPda, isSigner: false, isWritable: false },
-      { pubkey: last.proposalPda, isSigner: false, isWritable: true },
-    ],
-    data,
-  });
-
-  logLine('Executing proposal ' + last.proposalPda.toBase58());
-  await sendTx([ix]);
-}
-
-function wire() {
-  document.getElementById('btnConnect').onclick = () => connect().catch(e => logLine('ERROR: ' + e.message));
-  document.getElementById('btnDisconnect').onclick = () => disconnect().catch(e => logLine('ERROR: ' + e.message));
-  document.getElementById('btnInit').onclick = () => initBlueprint().catch(e => logLine('ERROR: ' + e.message));
-  document.getElementById('btnPropose').onclick = () => propose().catch(e => logLine('ERROR: ' + e.message));
-  document.getElementById('btnApprove').onclick = () => approve().catch(e => logLine('ERROR: ' + e.message));
-  document.getElementById('btnExecute').onclick = () => execute().catch(e => logLine('ERROR: ' + e.message));
-
-  const provider = getProvider();
-  if (provider?.isPhantom) {
-    provider.on('connect', () => logLine('wallet event: connect'));
-    provider.on('disconnect', () => logLine('wallet event: disconnect'));
+function renderMission() {
+  if (!mission) {
+    ui.curId.textContent = '—';
+    ui.curExplain.textContent = scenario().subtitle;
+    ui.vars.textContent = '{\n  // start a mission\n}';
+    ui.atts.textContent = '[\n  // none\n]';
+    ui.log.textContent = 'Ready. This is an explainer: click Start new mission.';
+    ui.btnNext.disabled = true;
+    return;
   }
 
-  logLine('Ready. Install Phantom, switch to devnet, paste Program ID, then run the flow.');
+  ui.btnNext.disabled = mission.status === 'DONE' || mission.status === 'ESCALATED' || mission.status === 'BLOCKED';
+
+  ui.curId.textContent = mission.cur;
+  ui.curExplain.textContent = mission.curExplain;
+  ui.vars.textContent = JSON.stringify(mission.vars, null, 2);
+  ui.atts.textContent = JSON.stringify(mission.atts, null, 2);
+  ui.log.textContent = mission.log.map((l, i) => `${String(i+1).padStart(2,'0')}. ${l}`).join('\n');
 }
 
-wire();
+function renderAll() {
+  renderTabs();
+  renderGraph();
+  renderMission();
+}
+
+function startMission() {
+  const first = scenario().checkpoints[0];
+  mission = {
+    id: `mission_${Math.random().toString(16).slice(2, 8)}`,
+    cur: first.id,
+    curExplain: first.explain,
+    vars: {},
+    atts: [],
+    log: [],
+    status: 'STARTED',
+  };
+  log(mission, `Mission started from blueprint "${scenario().key}".`);
+  log(mission, 'Key idea: chain enforces ordering + state, while some checkpoints accept attestations.');
+  // run first checkpoint action immediately
+  first.action(mission, flags());
+  mission.curExplain = first.explain;
+  renderAll();
+}
+
+function flags() {
+  return {
+    conflict: ui.hiccupConflict.checked,
+    drift: ui.hiccupDrift.checked,
+    timeout: ui.hiccupTimeout.checked,
+  };
+}
+
+function nextCheckpoint() {
+  const cps = scenario().checkpoints;
+  const idx = cps.findIndex(c => c.id === mission.cur);
+  if (idx === -1) return;
+  if (mission.status === 'DONE' || mission.status === 'ESCALATED' || mission.status === 'BLOCKED') return;
+
+  const next = cps[idx + 1];
+  if (!next) {
+    mission.status = 'DONE';
+    log(mission, 'Reached end of blueprint.');
+    renderAll();
+    return;
+  }
+
+  mission.cur = next.id;
+  mission.curExplain = next.explain;
+  const res = next.action(mission, flags()) || {};
+  if (res.halt) {
+    // keep current but stop progression
+    renderAll();
+    return;
+  }
+
+  renderAll();
+}
+
+function reset() {
+  mission = null;
+  renderAll();
+}
+
+ui.btnStart.onclick = startMission;
+ui.btnNext.onclick = nextCheckpoint;
+ui.btnReset.onclick = reset;
+
+renderAll();

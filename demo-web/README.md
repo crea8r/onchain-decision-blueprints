@@ -3,9 +3,10 @@
 This folder is a **static site** (no build step) suitable for Netlify.
 
 ## How it works
-- Uses Phantom (or any injected `window.solana`) to sign transactions.
-- Uses `@solana/web3.js` via ESM CDN.
-- Talks to a **devnet deployed** program id.
+This is an **interactive explainer** (not a live devnet demo):
+- teaches Blueprint → Mission → Checkpoints
+- provides a happy-path walkthrough
+- lets viewers toggle common hiccups (conflicting attestations, terms drift, timeouts)
 
 ## Deploy to Netlify
 Option A (quick):
