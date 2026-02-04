@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>On-chain Decision Blueprints — Interactive Demo</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0b0f14; color:#e6edf3; }
+      a { color: #7ee787; }
+      .wrap { max-width: 960px; margin: 0 auto; padding: 24px; }
+      .card { background:#0f1720; border:1px solid #243040; border-radius: 14px; padding: 16px; margin: 12px 0; }
+      .row { display:flex; gap: 12px; flex-wrap: wrap; }
+      .row > * { flex: 1; min-width: 220px; }
+      label { display:block; font-size: 12px; opacity: .8; margin-bottom: 6px; }
+      input, textarea, select { width: 100%; padding: 10px 12px; border-radius: 10px; border:1px solid #2b3b50; background:#0b121b; color:#e6edf3; }
+      textarea { min-height: 92px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      button { padding: 10px 12px; border-radius: 10px; border:1px solid #2b3b50; background:#111c28; color:#e6edf3; cursor:pointer; }
+      button.primary { background:#1f6feb; border-color:#1f6feb; }
+      button:disabled { opacity: .5; cursor:not-allowed; }
+      pre { overflow:auto; padding: 12px; border-radius: 12px; background:#081018; border:1px solid #223042; }
+      .pill { display:inline-block; padding: 4px 10px; border-radius:999px; border:1px solid #2b3b50; background:#0b121b; font-size: 12px; }
+      .ok { color:#7ee787; }
+      .warn { color:#f2cc60; }
+      .bad { color:#ff7b72; }
+      .small { font-size: 12px; opacity: .8; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>On-chain Decision Blueprints for AI Agents</h1>
+      <div class="small">Interactive demo (Netlify-friendly static site). Connect a Solana wallet (Phantom) on <span class="mono">devnet</span> and run a propose → approve → execute flow.</div>
+
+      <div class="card">
+        <div class="row">
+          <div>
+            <div class="pill" id="walletState">wallet: <span class="warn">disconnected</span></div>
+          </div>
+          <div style="text-align:right">
+            <button id="btnConnect" class="primary">Connect Wallet</button>
+            <button id="btnDisconnect">Disconnect</button>
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <div>
+            <label>RPC (devnet)</label>
+            <input id="rpcUrl" value="https://api.devnet.solana.com" />
+          </div>
+          <div>
+            <label>Program ID (deploy your program to devnet)</label>
+            <input id="programId" placeholder="Paste program id here" />
+            <div class="small">I can’t deploy from this environment (no Solana toolchain). Paste the devnet program id once deployed.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>1) Initialize Blueprint</h3>
+        <div class="row">
+          <div>
+            <label>Approver pubkeys (one per line)</label>
+            <textarea id="approvers"></textarea>
+            <div class="small">Tip: put your own pubkey in the list so you can approve.</div>
+          </div>
+          <div>
+            <label>Threshold</label>
+            <input id="threshold" type="number" min="1" value="1" />
+            <label style="margin-top:12px">Authority (connected wallet)</label>
+            <input id="authority" disabled />
+          </div>
+        </div>
+        <button id="btnInit" class="primary">Initialize Blueprint</button>
+        <div class="small">Creates a PDA: <span class="mono">PDA("blueprint", authority)</span></div>
+      </div>
+
+      <div class="card">
+        <h3>2) Propose Action</h3>
+        <div class="row">
+          <div>
+            <label>Action type</label>
+            <input id="actionType" type="number" value="1" />
+          </div>
+          <div>
+            <label>Payload (text) — will hash to 32 bytes</label>
+            <input id="payload" placeholder='e.g. "transfer 0.1 SOL to ..."' />
+          </div>
+        </div>
+        <button id="btnPropose" class="primary">Propose</button>
+        <div class="small">Proposal PDA: <span class="mono">PDA("proposal", blueprint, payload_hash)</span></div>
+      </div>
+
+      <div class="card">
+        <h3>3) Approve & Execute</h3>
+        <div class="row">
+          <div>
+            <button id="btnApprove" class="primary">Approve</button>
+          </div>
+          <div>
+            <button id="btnExecute">Execute</button>
+          </div>
+        </div>
+        <div class="small">MVP execute just marks executed & emits a log. Next iteration can gate CPI to real actions.</div>
+      </div>
+
+      <div class="card">
+        <h3>Output</h3>
+        <pre id="log"></pre>
+      </div>
+
+      <div class="card small">
+        Repo: <a href="https://github.com/crea8r/onchain-decision-blueprints" target="_blank" rel="noreferrer">crea8r/onchain-decision-blueprints</a>
+      </div>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

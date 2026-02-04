@@ -22,6 +22,10 @@ This provides a verifiable, replayable audit trail and prevents "agent went rogu
   - `ExecuteAction` (for MVP: emits event + marks executed; later: can gate CPI)
 - Client SDK (TypeScript): helpers to create proposals, approve, execute, read state.
 
+## Interactive demo (Netlify)
+
+See `demo-web/` for a static interactive demo site you can deploy to Netlify.
+
 ## Status
 
-Drafting.
+MVP scaffold + demo UI in progress.
