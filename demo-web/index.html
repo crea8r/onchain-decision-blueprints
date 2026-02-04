@@ -9,7 +9,7 @@
     body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--fg)}
     a{color:var(--ok)}
     .wrap{max-width:1100px;margin:0 auto;padding:22px}
-    .grid{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}
+    .grid{display:grid;grid-template-columns:1fr;gap:14px}
     @media (max-width: 980px){.grid{grid-template-columns:1fr}}
     .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px}
     h1{margin:0 0 6px 0;font-size:22px}
@@ -36,6 +36,7 @@
     .node .t{font-size:13px;margin-top:4px}
     .node .meta{margin-top:6px;font-size:12px;color:var(--muted)}
     .legend{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    .slide{min-height: 220px}
     .sep{height:1px;background:#223042;margin:10px 0}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
   </style>
@@ -44,73 +45,117 @@
   <div class="wrap">
     <h1>On-chain Decision Blueprints for AI Agents</h1>
     <div class="small">
-      This is an <b>interactive explainer</b> (not a devnet demo). It helps humans understand how a future of business agents can follow
-      <b>exact workflows</b> with auditability: <code>Blueprint (template)</code> → <code>Mission (runtime)</code> → <code>Checkpoint (step)</code>.
+      This is an <b>story-first interactive explainer</b>. We start with a hero and their journey, then zoom in only when you’re ready.
+      Concept: <code>Blueprint</code> (template) → <code>Mission</code> (runtime) → <code>Checkpoints</code> (steps).
     </div>
 
     <div class="tabs" id="tabs"></div>
+    <div class="small" style="margin-top:6px">Pick a story. Each story is a hero moving through a blueprint. We reveal one layer at a time.</div>
 
-    <div class="grid" style="margin-top:12px">
-      <div class="card">
-        <h2>Blueprint (template)</h2>
-        <div class="small">A blueprint is a graph of checkpoints. A mission is a token moving through this graph.</div>
-        <div class="legend">
-          <span class="pill">Enforced on-chain</span>
-          <span class="pill">Attestation-based</span>
-          <span class="pill">Branch / retry</span>
+    <div class="card" style="margin-top:12px">
+      <div class="row" style="align-items:center">
+        <div>
+          <h2 id="storyTitle">The Hero & the Journey</h2>
+          <div class="small" id="storySubtitle"></div>
         </div>
-        <h3 style="margin-top:10px">Visual walkthrough</h3>
-        <div class="small">A simple canvas animation of the mission moving through steps (before the details below).</div>
-        <div class="sep"></div>
-        <canvas id="viz" width="980" height="200" style="width:100%;height:auto;border-radius:14px;border:1px solid #223042;background:#081018"></canvas>
-        <div class="sep"></div>
-        <div id="graph" class="graph"></div>
+        <div style="text-align:right">
+          <button id="btnPrev">Back</button>
+          <button class="primary" id="btnStoryNext">Next</button>
+        </div>
       </div>
+      <div class="sep"></div>
 
-      <div class="card">
-        <h2>Mission (runtime instance)</h2>
-        <div class="small">Walk through the happy path, then toggle hiccups to see how workflows protect the org.</div>
+      <!-- Slide 1: Hero -->
+      <div class="slide" id="slideHero">
+        <h3>1) Meet the hero</h3>
+        <div class="small" id="heroText"></div>
         <div class="sep"></div>
-
         <div class="row">
           <div>
-            <h3>Controls</h3>
-            <button class="primary" id="btnStart">Start new mission</button>
-            <button id="btnNext">Next checkpoint</button>
+            <div class="pill">Blueprint</div>
+            <div class="small" style="margin-top:8px">The company’s policy / playbook (template).</div>
+          </div>
+          <div>
+            <div class="pill">Mission</div>
+            <div class="small" style="margin-top:8px">One real case / contract in motion (runtime instance).</div>
+          </div>
+          <div>
+            <div class="pill">Checkpoint</div>
+            <div class="small" style="margin-top:8px">One step machine: on-chain rule or attestation gate.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slide 2: Journey overview -->
+      <div class="slide" id="slideJourney" style="display:none">
+        <h3>2) The journey (high-level)</h3>
+        <div class="small">One thing at a time: watch the mission move through the workflow before we explain details.</div>
+        <div class="sep"></div>
+        <canvas id="viz" width="980" height="220" style="width:100%;height:auto;border-radius:14px;border:1px solid #223042;background:#081018"></canvas>
+        <div class="hint">Tip: click <b>Start</b> then <b>Step</b> to move the hero forward.</div>
+        <div class="sep"></div>
+        <div class="row">
+          <div>
+            <button class="primary" id="btnStart">Start</button>
+            <button id="btnNext">Step</button>
             <button id="btnReset">Reset</button>
+          </div>
+          <div>
+            <div class="pill">current: <span class="mono" id="curId">—</span></div>
+            <div class="small" id="curExplain" style="margin-top:8px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Slide 3: Deep dive (one checkpoint at a time) -->
+      <div class="slide" id="slideDeep" style="display:none">
+        <h3>3) Deep dive (one checkpoint)</h3>
+        <div class="small">We zoom into the current checkpoint only. No full dashboard overload.</div>
+        <div class="sep"></div>
+        <div class="row">
+          <div>
+            <div class="pill">Checkpoint</div>
+            <h2 style="margin-top:10px" class="mono" id="deepCpTitle">—</h2>
+            <div class="small" id="deepCpExplain"></div>
             <div class="sep"></div>
-            <h3>Hiccups (simulate reality)</h3>
+            <div class="small"><b>Enforced on-chain</b> steps are deterministic. <b>Attestation</b> steps accept signed claims but are still ordered + audited.</div>
+          </div>
+          <div>
+            <h3>Mission state (only what changed)</h3>
+            <pre id="vars"></pre>
+          </div>
+        </div>
+        <div class="sep"></div>
+        <h3>What happened</h3>
+        <pre id="log"></pre>
+      </div>
+
+      <!-- Slide 4: Hiccups -->
+      <div class="slide" id="slideHiccups" style="display:none">
+        <h3>4) Real-world hiccups</h3>
+        <div class="small">Flip a switch, rerun the journey, and see where the workflow blocks or escalates.</div>
+        <div class="sep"></div>
+        <div class="row">
+          <div>
             <label class="small"><input type="checkbox" id="hiccupConflict" /> Conflicting attestations</label><br/>
             <label class="small"><input type="checkbox" id="hiccupDrift" /> Terms drift (attestations refer to old terms)</label><br/>
             <label class="small"><input type="checkbox" id="hiccupTimeout" /> Negotiation timeout → escalate to human</label>
+            <div class="sep"></div>
+            <button class="primary" id="btnRerun">Rerun story with hiccups</button>
           </div>
           <div>
-            <h3>Current</h3>
-            <div class="pill">checkpoint: <span class="mono" id="curId">—</span></div>
-            <div style="margin-top:8px" class="small" id="curExplain">Start a mission to begin.</div>
+            <h3>Why this matters</h3>
+            <div class="small">
+              The point isn’t perfect automation. It’s <b>safe autonomy</b>:
+              the agent can act, but the org still gets <b>policy enforcement</b>, <b>audit trails</b>, and <b>escalation</b>.
+            </div>
           </div>
         </div>
+      </div>
 
-        <div class="sep"></div>
-        <div class="row">
-          <div>
-            <h3>Variables (mission state)</h3>
-            <pre id="vars"></pre>
-          </div>
-          <div>
-            <h3>Attestations (2-of-3 for critical step)</h3>
-            <pre id="atts"></pre>
-          </div>
-        </div>
-
-        <div class="sep"></div>
-        <h3>Event log</h3>
-        <pre id="log"></pre>
-
-        <div class="sep"></div>
-        <div class="small">
-          Repo: <a href="https://github.com/crea8r/onchain-decision-blueprints" target="_blank" rel="noreferrer">crea8r/onchain-decision-blueprints</a>
-        </div>
+      <div class="sep"></div>
+      <div class="small">
+        Repo: <a href="https://github.com/crea8r/onchain-decision-blueprints" target="_blank" rel="noreferrer">crea8r/onchain-decision-blueprints</a>
       </div>
     </div>
   </div>

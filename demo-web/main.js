@@ -1,5 +1,8 @@
-// Interactive explainer (no wallet, no chain). The UI is designed to teach humans.
-// Model: Blueprint = template; Mission = blueprint-in-action; Checkpoint = step machine.
+// Story-first interactive explainer (no wallet, no chain).
+// Visual communication rules:
+// - hero + journey
+// - one thing at a time
+// - progressive disclosure (overview → zoom-in → hiccups)
 
 const SCENARIOS = {
   contract: {
@@ -173,24 +176,53 @@ function log(m, msg) {
 
 const ui = {
   tabs: document.getElementById('tabs'),
-  graph: document.getElementById('graph'),
   viz: document.getElementById('viz'),
-  curId: document.getElementById('curId'),
-  curExplain: document.getElementById('curExplain'),
-  vars: document.getElementById('vars'),
-  atts: document.getElementById('atts'),
-  log: document.getElementById('log'),
+
+  // story header
+  storyTitle: document.getElementById('storyTitle'),
+  storySubtitle: document.getElementById('storySubtitle'),
+
+  // slides
+  slideHero: document.getElementById('slideHero'),
+  slideJourney: document.getElementById('slideJourney'),
+  slideDeep: document.getElementById('slideDeep'),
+  slideHiccups: document.getElementById('slideHiccups'),
+
+  // nav
+  btnPrev: document.getElementById('btnPrev'),
+  btnStoryNext: document.getElementById('btnStoryNext'),
+
+  // hero
+  heroText: document.getElementById('heroText'),
+
+  // journey controls
   btnStart: document.getElementById('btnStart'),
   btnNext: document.getElementById('btnNext'),
   btnReset: document.getElementById('btnReset'),
+  curId: document.getElementById('curId'),
+  curExplain: document.getElementById('curExplain'),
+
+  // deep
+  deepCpTitle: document.getElementById('deepCpTitle'),
+  deepCpExplain: document.getElementById('deepCpExplain'),
+
+  // state/log
+  vars: document.getElementById('vars'),
+  log: document.getElementById('log'),
+
+  // hiccups
   hiccupConflict: document.getElementById('hiccupConflict'),
   hiccupDrift: document.getElementById('hiccupDrift'),
   hiccupTimeout: document.getElementById('hiccupTimeout'),
+  btnRerun: document.getElementById('btnRerun'),
 };
 
 let scenarioKey = 'contract';
 let mission = null;
 let lastCur = null;
+
+// Story slide state
+let slideIndex = 0; // 0 hero → 1 journey → 2 deep → 3 hiccups
 
 // Canvas animation state
 let anim = {
@@ -203,29 +235,32 @@ let anim = {
 
 function scenario() { return SCENARIOS[scenarioKey]; }
 
+function applySlide() {
+  ui.btnPrev.disabled = slideIndex === 0;
+  ui.btnStoryNext.textContent = slideIndex === 3 ? 'Done' : 'Next';
+
+  if (slideIndex === 0) setSlide(ui.slideHero);
+  if (slideIndex === 1) setSlide(ui.slideJourney);
+  if (slideIndex === 2) setSlide(ui.slideDeep);
+  if (slideIndex === 3) setSlide(ui.slideHiccups);
+}
+
 function renderTabs() {
   ui.tabs.innerHTML = '';
   for (const s of Object.values(SCENARIOS)) {
     const b = document.createElement('button');
     b.className = 'tab' + (s.key === scenarioKey ? ' active' : '');
     b.textContent = s.title;
-    b.onclick = () => { scenarioKey = s.key; mission = null; lastCur = null; anim.running = false; renderAll(); };
+    b.onclick = () => {
+      scenarioKey = s.key;
+      mission = null;
+      lastCur = null;
+      anim.running = false;
+      slideIndex = 0;
+      applySlide();
+      renderAll();
+    };
     ui.tabs.appendChild(b);
-  }
-}
-
-function renderGraph() {
-  ui.graph.innerHTML = '';
-  const cps = scenario().checkpoints;
-  for (const cp of cps) {
-    const d = document.createElement('div');
-    d.className = 'node' + (mission && mission.cur === cp.id ? ' active' : '');
-    d.innerHTML = `
-      <div class="k">${cp.id} • ${badge(cp.mode)}</div>
-      <div class="t">${cp.title}</div>
-      <div class="meta">${cp.explain}</div>
-    `;
-    ui.graph.appendChild(d);
   }
 }
 
@@ -278,7 +313,9 @@ function renderViz() {
     // title
     ctx.fillStyle = 'rgba(148,163,184,0.9)';
     ctx.font = '12px ui-sans-serif, system-ui';
-    ctx.fillText(scenario().subtitle, 18, 22);
+    ctx.fillText('Journey map (high-level)', 18, 22);
+    ctx.fillStyle = 'rgba(148,163,184,0.75)';
+    ctx.fillText(scenario().subtitle, 18, 40);
 
     // connectors
     ctx.strokeStyle = 'rgba(36,48,64,1)';
@@ -317,7 +354,7 @@ function renderViz() {
       ctx.textBaseline = 'alphabetic';
       ctx.textAlign = 'center';
       ctx.font = '11px ui-sans-serif, system-ui';
-      const tag = p.mode === 'enforced' ? 'ON-CHAIN' : (p.mode === 'attestation' ? 'ATTEST' : 'BRANCH');
+      const tag = badgeText(p.mode);
       ctx.fillStyle = p.mode === 'enforced' ? 'rgba(31,111,235,0.9)' : (p.mode === 'attestation' ? 'rgba(242,204,96,0.9)' : 'rgba(148,163,184,0.9)');
       ctx.fillText(tag, p.x, p.y + 34);
     }
@@ -355,37 +392,70 @@ function renderViz() {
   requestAnimationFrame(draw);
 }
 
-function badge(mode) {
-  if (mode === 'enforced') return '<span class="pill">Enforced on-chain</span>';
-  if (mode === 'attestation') return '<span class="pill">Attestation-based</span>';
-  return '<span class="pill">Branch / retry</span>';
+function badgeText(mode) {
+  if (mode === 'enforced') return 'ON-CHAIN';
+  if (mode === 'attestation') return 'ATTEST';
+  return 'BRANCH';
 }
 
-function renderMission() {
+function curCheckpoint() {
+  if (!mission) return null;
+  return scenario().checkpoints.find(c => c.id === mission.cur) || null;
+}
+
+function renderStoryHeader() {
+  ui.storyTitle.textContent = scenario().title;
+  ui.storySubtitle.textContent = scenario().subtitle;
+
+  // hero text (story-first framing)
+  if (scenarioKey === 'contract') {
+    ui.heroText.textContent = "Hero: a Buyer Agent trying to close a contract fast — without breaking the company’s rules. The villain is ambiguity: messy negotiations, missing approvals, and silent policy drift.";
+  } else {
+    ui.heroText.textContent = "Hero: a Support Agent trying to resolve a case quickly — without granting refunds or escalations outside policy. The villain is inconsistency: human error and bad incentives.";
+  }
+}
+
+function setSlide(which) {
+  const slides = [ui.slideHero, ui.slideJourney, ui.slideDeep, ui.slideHiccups];
+  for (const s of slides) s.style.display = 'none';
+  which.style.display = '';
+}
+
+function renderJourneyPanel() {
   if (!mission) {
     ui.curId.textContent = '—';
-    ui.curExplain.textContent = scenario().subtitle;
-    ui.vars.textContent = '{\n  // start a mission\n}';
-    ui.atts.textContent = '[\n  // none\n]';
-    ui.log.textContent = 'Ready. This is an explainer: click Start new mission.';
+    ui.curExplain.textContent = 'Click Start to begin the journey.';
     ui.btnNext.disabled = true;
     return;
   }
-
   ui.btnNext.disabled = mission.status === 'DONE' || mission.status === 'ESCALATED' || mission.status === 'BLOCKED';
-
   ui.curId.textContent = mission.cur;
   ui.curExplain.textContent = mission.curExplain;
+}
+
+function renderDeepDive() {
+  const cp = curCheckpoint();
+  if (!mission || !cp) {
+    ui.deepCpTitle.textContent = '—';
+    ui.deepCpExplain.textContent = 'Start a mission first.';
+    ui.vars.textContent = '{\n  // no state yet\n}';
+    ui.log.textContent = '—';
+    return;
+  }
+  ui.deepCpTitle.textContent = `${cp.id}: ${cp.title} (${badgeText(cp.mode)})`;
+  ui.deepCpExplain.textContent = cp.explain;
+
+  // show only the delta-ish story: current vars snapshot is fine, but we’re not showing attestations wall.
   ui.vars.textContent = JSON.stringify(mission.vars, null, 2);
-  ui.atts.textContent = JSON.stringify(mission.atts, null, 2);
   ui.log.textContent = mission.log.map((l, i) => `${String(i+1).padStart(2,'0')}. ${l}`).join('\n');
 }
 
 function renderAll() {
   renderTabs();
+  renderStoryHeader();
   renderViz();
-  renderGraph();
-  renderMission();
+  renderJourneyPanel();
+  renderDeepDive();
 }
 
 function startMission() {
@@ -401,13 +471,12 @@ function startMission() {
   };
   lastCur = null;
   log(mission, `Mission started from blueprint "${scenario().key}".`);
-  log(mission, 'Key idea: chain enforces ordering + state, while some checkpoints accept attestations.');
+  log(mission, 'The chain acts like a shared computer: ordered inputs → deterministic state.');
   // run first checkpoint action immediately
   first.action(mission, flags());
   mission.curExplain = first.explain;
   renderAll();
 }
-
 function flags() {
   return {
     conflict: ui.hiccupConflict.checked,
@@ -446,12 +515,24 @@ function nextCheckpoint() {
 function reset() {
   mission = null;
   lastCur = null;
+  anim.running = false;
   renderAll();
 }
-
 ui.btnStart.onclick = startMission;
 ui.btnNext.onclick = nextCheckpoint;
 ui.btnReset.onclick = reset;
 
+ui.btnPrev.onclick = () => { slideIndex = Math.max(0, slideIndex - 1); applySlide(); };
+ui.btnStoryNext.onclick = () => {
+  if (slideIndex === 3) return; // done
+  slideIndex = Math.min(3, slideIndex + 1);
+  applySlide();
+  // if entering journey, ensure canvas visible redraw
+  renderAll();
+};
+
+ui.btnRerun.onclick = () => { reset(); startMission(); slideIndex = 1; applySlide(); };
+
 window.addEventListener('resize', () => renderViz());
+applySlide();
 renderAll();
